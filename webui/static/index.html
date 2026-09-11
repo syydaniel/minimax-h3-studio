@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H3 Studio</title>
+<link rel="stylesheet" href="style.css?v=5">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">H3</span> Studio <span class="sub" id="device-sub">MiniMax-H3 · h3.c</span></div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main class="layout">
+  <!-- 左：创作 -->
+  <section class="panel create">
+    <nav class="modes" id="modes">
+      <button data-mode="t2v" class="on">文生视频</button>
+      <button data-mode="i2v">首帧生视频</button>
+      <button data-mode="fl2v">首尾帧</button>
+      <button data-mode="ref">参考生视频</button>
+    </nav>
+
+    <div id="assets" class="assets"></div>
+
+    <label class="field-label">你的想法 <span class="hint">中文随便写，交给 Claude 改写成官方格式</span></label>
+    <textarea id="idea" rows="3" placeholder="例如：赛博朋克雨夜，一个机器人站在霓虹招牌下抬头看天，镜头慢慢拉远露出整座城市"></textarea>
+    <div class="row">
+      <button id="optimize" class="claude-btn"><span class="spark">✦</span> Claude 优化</button>
+      <span id="claude-state" class="muted small"></span>
+    </div>
+
+    <label class="field-label">最终提示词 <span class="hint">可直接编辑</span></label>
+    <textarea id="prompt" rows="10" class="mono" placeholder="integrated_multimodal_description: [Shot 1] ..."></textarea>
+    <div class="camera-chips" id="camera-chips" title="点击插入运镜描述"></div>
+
+    <label class="field-label">画幅 <span class="hint">MiniMax-H3 官方 768p 画布</span></label>
+    <div class="seg aspect-seg" id="aspect"></div>
+    <div class="size-readout muted small" id="size-readout"></div>
+
+    <label class="field-label">时长 <span class="hint" id="dur-readout"></span></label>
+    <input type="range" id="duration" min="6" max="21" step="1" value="7">
+
+    <label class="field-label">质量</label>
+    <div class="seg" id="quality"></div>
+
+    <details class="advanced">
+      <summary>高级参数</summary>
+      <div class="grid2">
+        <label>步数 <input type="number" id="steps" min="2" max="100"></label>
+        <label>种子 <input type="number" id="seed" value="42"></label>
+        <label>复用 reuse
+          <select id="reuse"><option value="1">1 精确</option><option value="2">2 快</option><option value="3">3 激进</option></select></label>
+        <label>DiT 层数
+          <select id="layers"><option>50</option><option>45</option><option>40</option></select></label>
+        <label>核心复用 core-reuse
+          <select id="core"><option value="1">关</option><option value="4">4</option><option value="6">6</option></select></label>
+        <label class="check"><input type="checkbox" id="token-red"> token 缩减</label>
+      </div>
+      <p class="muted small">reuse 和 core-reuse 互斥；开 core-reuse 时忽略 reuse。</p>
+    </details>
+
+    <div class="submit-bar">
+      <div class="eta" id="eta"></div>
+      <button id="submit" class="primary">生成</button>
+    </div>
+    <div id="form-error" class="error small" hidden></div>
+  </section>
+
+  <!-- 中：舞台 + 队列 + 画廊 -->
+  <section class="center">
+    <div class="panel stage" id="stage"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>作品</h2><span class="muted small" id="gallery-count"></span></div>
+      <div class="gallery" id="gallery"></div>
+    </div>
+  </section>
+
+  <!-- 右：监控 -->
+  <aside class="panel monitor">
+    <div class="panel-head"><h2>实时监控</h2><span class="muted small">最近 5 分钟</span></div>
+    <div id="metrics"></div>
+    <div class="panel-head sub-head"><h2>队列</h2></div>
+    <div id="queue" class="queue"></div>
+  </aside>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<!-- bump ?v= when these files change so browsers drop the cached copies -->
+<script src="create.js?v=5"></script>
+<script src="app.js?v=5"></script>
+</body>
+</html>

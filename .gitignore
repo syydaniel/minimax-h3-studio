@@ -1,0 +1,24 @@
+# model weights (downloaded by scripts/download-weights.sh, never committed)
+models/
+
+# UI runtime data: generated videos, job records (contain prompts), uploads
+webui/data/
+webui/.venv/
+# official prompt guides are fetched from the model repo by install.sh
+webui/guides/
+
+# h3.c build products
+third_party/h3.c/*.o
+third_party/h3.c/*.d
+third_party/h3.c/h3
+third_party/h3.c/h3_*tests
+third_party/h3.c/h3_*test
+third_party/h3.c/libh3.a
+third_party/h3.c/outputs/
+third_party/h3.c/tests/*.o
+third_party/h3.c/tests/*.d
+
+# local test output
+outputs/
+__pycache__/
+.DS_Store
