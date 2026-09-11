@@ -19,9 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-This license covers the code and documentation written for this repository.
-It does not cover third_party/h3.c (MIT, Copyright (c) 2026 Salvatore
-Sanfilippo, see third_party/h3.c/LICENSE) or the MiniMax-H3 model weights,
-which are not included and are governed by the MiniMax H3 Community License.
-See THIRD_PARTY_NOTICES.md.
