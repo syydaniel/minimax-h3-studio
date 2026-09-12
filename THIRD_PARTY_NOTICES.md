@@ -25,6 +25,21 @@
 - 来源：模型仓库的 `docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md` 与 `docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md`
 - 由 `install.sh` 下载到 `webui/guides/`，供 Claude 优化功能作为系统提示使用
 
+## 步数蒸馏 LoRA（不随仓库分发，可选）
+
+只有按 [`docs/TURBO.md`](docs/TURBO.md) 自行构建 Turbo 权重时才需要下载。
+两者都是 MiniMax-H3 的衍生物，除各自许可外仍受 MiniMax H3 Community License 约束。
+
+- FL2VA：https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora ，Apache-2.0
+- Ref2VA：https://huggingface.co/lightx2v/Minimax-h3-Turbo ，Apache-2.0
+
+## LoRA 折叠脚本（随仓库分发）
+
+- 位置：`tools/fold_turbo_lora.py`
+- 上游：https://github.com/antirez/h3.c/pull/14 ，作者 Guy Zyskind（`guyz`）
+- 许可：MIT（随 h3.c，版权归 Salvatore Sanfilippo）
+- 本仓库内为逐字节未修改的副本；该 PR 截至收录时尚未合并进 h3.c 上游
+
 ## 画布算法
 
 `webui/server.py` 的 `official_canvas()` 与 `webui/static/create.js` 的 `resolveCanvas()`

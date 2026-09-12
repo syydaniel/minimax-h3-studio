@@ -5,7 +5,7 @@ Runs h3 as a subprocess per job, one at a time, parses its stderr progress
 CPU/GPU/memory telemetry to the browser over Server-Sent Events.
 Binds to 127.0.0.1 only.
 """
-import asyncio, json, os, re, shutil, signal, subprocess, time, uuid
+import asyncio, functools, json, os, re, shutil, signal, subprocess, time, uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,6 +21,10 @@ import claude_opt
 REPO = Path(__file__).resolve().parent.parent
 H3_BIN = Path(os.environ.get("H3_BIN", REPO / "third_party" / "h3.c" / "h3"))
 MODEL = Path(os.environ.get("H3_MODEL_DIR", REPO / "models" / "MiniMax-H3"))
+# Optional Turbo variant: the same checkpoint with a step-distillation LoRA
+# folded into its transformers. Absent unless the user builds it (docs/TURBO.md);
+# the UI then shows Turbo as 未安装 and refuses to select it.
+TURBO_MODEL = Path(os.environ.get("H3_TURBO_MODEL_DIR", REPO / "models" / "MiniMax-H3-turbo"))
 DATA = Path(os.environ.get("H3_DATA_DIR", REPO / "webui" / "data"))
 CLI_OUTPUTS = H3_BIN.parent / "outputs"   # clips made with the h3 CLI get imported
 
@@ -166,14 +170,15 @@ def align_frames(n):
     return 5 + 17 * max(0, -(-(n - 5) // 17))
 
 
-def official_canvas(aw, ah):
+def official_canvas(aw, ah, short_edge=768):
     """diffusers MiniMax-H3 resolve_canvas_size for the released checkpoint:
-    short edge 768, area capped at 768*1344, axes rounded to the nearest 32.
+    short edge 768 (480 for the faster tier), area capped at 768*1344, axes
+    rounded to the nearest 32.
     Rounding can push the area slightly over the cap (2.39:1 gives 1568x672),
     which h3.c rejects, so the long axis then steps down by 32 until it fits.
     Mirrored by resolveCanvas() in static/create.js."""
     ratio = min(4.0, max(0.25, aw / ah))
-    w, h = (768 * ratio, 768.0) if ratio >= 1 else (768.0, 768 / ratio)
+    w, h = (short_edge * ratio, float(short_edge)) if ratio >= 1 else (float(short_edge), short_edge / ratio)
     if w * h > MAX_PIXELS:
         s = (MAX_PIXELS / (w * h)) ** 0.5
         w, h = w * s, h * s
@@ -188,7 +193,19 @@ def official_canvas(aw, ah):
 
 # Every canvas the resolver can produce for a ratio in [1/4, 4]. A job's size
 # must be one of these, so arbitrary sizes cannot slip in through the API.
-OFFICIAL_CANVASES = {official_canvas(4 ** (i / 20000 * 2 - 1), 1) for i in range(20001)}
+OFFICIAL_CANVASES = {official_canvas(4 ** (i / 20000 * 2 - 1), 1, s)
+                     for i in range(20001) for s in (768, 480)}
+
+
+# Turbo is a distilled schedule: it runs few steps and has none of the
+# redundancy that reuse / core-reuse / token reduction exploit, so those are
+# refused rather than silently ignored. lightx2v's 768p Ref2VA adapter is
+# trained for video shift 6 (h3.c reads H3_VIDEO_SHIFT; see docs/TURBO.md).
+TURBO_STEPS = {"ref": (8, 8), "other": (5, 8)}
+
+
+def model_dir_for(job):
+    return TURBO_MODEL if job["params"].get("variant") == "turbo" else MODEL
 
 
 def build_argv(job):
@@ -201,6 +218,21 @@ def build_argv(job):
         w, h = int(p["width"]), int(p["height"])
     except (KeyError, TypeError, ValueError):
         raise ValueError("缺少画布尺寸：params 里需要 width 和 height")
+    variant = p.get("variant", "base")
+    if variant not in ("base", "turbo"):
+        raise ValueError("未知模型：只有 base 和 turbo")
+    model = model_dir_for(job)
+    job["env"] = {}
+    if variant == "turbo":
+        if not turbo_ready(job["mode"]):
+            raise ValueError("Turbo 权重未安装，构建方法见 docs/TURBO.md")
+        lo, hi = TURBO_STEPS["ref" if job["mode"] == "ref" else "other"]
+        if not lo <= int(p.get("steps", 6)) <= hi:
+            raise ValueError(f"Turbo 在这个模式下只支持 {lo} 到 {hi} 步")
+        if int(p.get("reuse", 1)) > 1 or core_reuse > 1 or token_reduction:
+            raise ValueError("Turbo 不能与 reuse、core-reuse 或 token 缩减同时使用")
+        if job["mode"] == "ref":
+            job["env"]["H3_VIDEO_SHIFT"] = "6"
     if (w, h) not in OFFICIAL_CANVASES:
         raise ValueError(f"{w}×{h} 不是 MiniMax-H3 官方 768p 画布（例如 16:9 为 1344×768）")
     frames = align_frames(int(p.get("frames", 124)))
@@ -211,7 +243,7 @@ def build_argv(job):
     steps = int(p.get("steps", 20))
     if not 2 <= steps <= 100:
         raise ValueError("步数需在 2 到 100 之间")
-    argv = [str(H3_BIN), "--profile", "-d", str(MODEL), "-p", job["prompt"],
+    argv = [str(H3_BIN), "--profile", "-d", str(model), "-p", job["prompt"],
             "--width", str(w), "--height", str(h), "--frames", str(frames),
             "--steps", str(steps), "--layers", str(int(p.get("layers", 50))),
             "--seed", str(int(p.get("seed", 42))), "-o", job["output"]]
@@ -292,7 +324,7 @@ async def run_job(job):
     # Decode with the checkpoint's own vae_tile_size (256). Unpatched h3.c picks
     # 304-320 px tiles for every 768p canvas, which leaves a 16 px ViT patch
     # grid in flat areas (antirez/h3.c PR #1).
-    env = {**os.environ, "H3_VAE_TILE_PIXELS": "256"}
+    env = {**os.environ, "H3_VAE_TILE_PIXELS": "256", **job.get("env", {})}
     current_proc = await asyncio.create_subprocess_exec(
         *argv, cwd=str(H3_BIN.parent), env=env, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT)
@@ -375,10 +407,34 @@ def ref2va_ready():
     return all((MODEL / "Ref2VA" / p).exists() for p in REF2VA_REQUIRED)
 
 
+@functools.cache
+def engine_has_shift_override():
+    """Upstream h3.c hardcodes the video sigma shift (12). lightx2v's 768p
+    Ref2VA adapter is trained for shift 6, so H3_VIDEO_SHIFT only means
+    something on a build that reads it (see docs/TURBO.md). Probe the binary
+    instead of assuming: on a stock build it would be set and silently ignored."""
+    try:
+        out = subprocess.run(["strings", str(H3_BIN)], capture_output=True,
+                             text=True, timeout=30).stdout
+    except Exception:
+        return False
+    return "H3_VIDEO_SHIFT" in out
+
+
+def turbo_ready(mode=None):
+    if not (TURBO_MODEL / "FL2VA/transformer/config.json").exists():
+        return False
+    if mode == "ref":
+        return (engine_has_shift_override()
+                and all((TURBO_MODEL / "Ref2VA" / p).exists() for p in REF2VA_REQUIRED))
+    return True
+
+
 @app.get("/api/status")
 def status():
     return {"h3": H3_BIN.exists(), "fl2va": (MODEL / "FL2VA/transformer/config.json").exists(),
-            "ref2va": ref2va_ready(), "external_h3": external_h3(), "device": DEVICE}
+            "ref2va": ref2va_ready(), "external_h3": external_h3(), "device": DEVICE,
+            "turbo": turbo_ready(), "turbo_ref": turbo_ready("ref")}
 
 
 @app.get("/api/jobs")

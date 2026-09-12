@@ -65,7 +65,8 @@ function pipelineHTML(job) {
 function paramLine(job) {
   const p = job.params || {};
   if (!p.width) return MODE_NAMES[job.mode] || "";
-  const bits = [MODE_NAMES[job.mode], `${p.width}×${p.height}`, `${(p.frames / 24).toFixed(2)} 秒`, `${p.steps} 步`];
+  const bits = [MODE_NAMES[job.mode], p.variant === "turbo" ? "Turbo" : "原版",
+                `${p.width}×${p.height}`, `${(p.frames / 24).toFixed(2)} 秒`, `${p.steps} 步`];
   if ((p.core_reuse || 1) > 1) bits.push(`core-reuse ${p.core_reuse}`); else if (p.reuse > 1) bits.push(`reuse ${p.reuse}`);
   if (p.token_reduction) bits.push("token 缩减");
   if (p.layers && p.layers < 50) bits.push(`${p.layers} 层`);
@@ -315,7 +316,6 @@ async function boot() {
   buildMetrics();
   try {
     App.status = await api("/api/status");
-    if (App.status.device) $("#device-sub").textContent = `MiniMax-H3 · h3.c · ${App.status.device}`;
     initCreate(App.status);
     const list = await api("/api/jobs");
     list.forEach(j => App.jobs.set(j.id, j));

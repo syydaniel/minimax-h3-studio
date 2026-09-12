@@ -31,6 +31,10 @@ function fmtDur(sec) {
 const MAX_PIXELS = 768 * 1344;
 /* The six ratios MiniMax-H3 lists as supported. Pixels come from resolveCanvas. */
 const ASPECTS = { "21:9": [21, 9], "16:9": [16, 9], "4:3": [4, 3], "1:1": [1, 1], "3:4": [3, 4], "9:16": [9, 16] };
+/* 768 is the canvas H3 was released for; 480 is the same official geometry at a
+   smaller short edge, about 40% of the pixels and correspondingly faster. */
+const SHORT_EDGES = [[768, "768p", "官方画布"], [480, "480p", "约快 2 倍"]];
+const VARIANTS = [["base", "原版", "官方权重"], ["turbo", "Turbo 加速", "蒸馏，步数少"]];
 
 /* Port of diffusers MiniMax-H3 `resolve_canvas_size` (released checkpoint:
    short edge 768, area capped at 768*1344, both axes rounded to the nearest
@@ -45,9 +49,9 @@ function roundHalfEven(x) {
    h3.c rejects, so the long axis then steps down by 32 until it fits. The
    third element says whether that happened. Mirrors official_canvas() in
    server.py. */
-function resolveCanvas(aw, ah) {
+function resolveCanvas(aw, ah, shortEdge = 768) {
   const ratio = Math.min(4, Math.max(0.25, aw / ah));
-  let w = ratio >= 1 ? 768 * ratio : 768, h = ratio >= 1 ? 768 : 768 / ratio;
+  let w = ratio >= 1 ? shortEdge * ratio : shortEdge, h = ratio >= 1 ? shortEdge : shortEdge / ratio;
   if (w * h > MAX_PIXELS) { const s = Math.sqrt(MAX_PIXELS / (w * h)); w *= s; h *= s; }
   const r32 = v => Math.max(32, roundHalfEven(v / 32) * 32);
   w = r32(w); h = r32(h);
@@ -62,6 +66,22 @@ const QUALITY = {
   fine:    { label: "精品", sub: "20 步", steps: 20, reuse: 1, layers: 50, core: 1, token: false },
   ref:     { label: "参考级", sub: "50 步", steps: 50, reuse: 1, layers: 50, core: 1, token: false },
 };
+/* Turbo runs a distilled schedule: few steps, and none of the redundancy that
+   reuse / core-reuse / token reduction rely on, so those stay off. larryvrh's
+   FL2VA adapter is validated from 5 steps (4 smears fast motion); lightx2v's
+   Ref2VA adapter is an 8-step one. */
+const TURBO_QUALITY = {
+  t5: { label: "最快", sub: "5 步", steps: 5, reuse: 1, layers: 50, core: 1, token: false },
+  t6: { label: "推荐", sub: "6 步", steps: 6, reuse: 1, layers: 50, core: 1, token: false },
+  t8: { label: "更稳", sub: "8 步", steps: 8, reuse: 1, layers: 50, core: 1, token: false },
+};
+const TURBO_REF_QUALITY = {
+  t8: { label: "参考模式", sub: "8 步 · shift 6", steps: 8, reuse: 1, layers: 50, core: 1, token: false },
+};
+function presets() {
+  if (S.variant !== "turbo") return QUALITY;
+  return S.mode === "ref" ? TURBO_REF_QUALITY : TURBO_QUALITY;
+}
 const CAMERA = [
   ["推近", "The camera pushes in with small amplitude at slow speed toward "],
   ["拉远", "The camera pulls out with large amplitude at slow speed, revealing "],
@@ -85,9 +105,9 @@ const framesOf = k => 5 + 17 * k;
 
 /* "auto" follows the first keyframe's own aspect, like the official pipeline. */
 function canvasFor() {
-  if (S.aspect === "auto" && S.first && S.first.w) return resolveCanvas(S.first.w, S.first.h);
+  if (S.aspect === "auto" && S.first && S.first.w) return resolveCanvas(S.first.w, S.first.h, S.short);
   const [a, b] = ASPECTS[S.aspect === "auto" ? "16:9" : S.aspect];
-  return resolveCanvas(a, b);
+  return resolveCanvas(a, b, S.short);
 }
 
 /* ETA model, calibrated on this M3 Max:
@@ -102,6 +122,7 @@ function secPerEval(x) {
   return Math.exp(y0 + ((lx - x0) * (y1 - y0)) / (x1 - x0));
 }
 function evalsOf(p) {
+  if (p.variant === "turbo") return p.steps;          // distilled: every step is a full forward
   if (p.core > 1) return p.steps * (0.3 + 0.7 / p.core);
   return p.reuse === 1 ? p.steps : Math.ceil(p.steps / p.reuse) + 1;
 }
@@ -116,6 +137,8 @@ function estimate(p) {
 const S = {
   mode: "t2v",
   aspect: store.get("aspect", "16:9"),
+  short: SHORT_EDGES.some(([s]) => s === store.get("short", 768)) ? store.get("short", 768) : 768,
+  variant: store.get("variant", "base"),
   k: Math.min(K_MAX, Math.max(K_MIN, store.get("k", 7))),
   quality: store.get("quality", "balanced"),
   first: null, last: null,        // {file, url}
@@ -129,6 +152,7 @@ function params() {
     width, height, frames: framesOf(S.k),
     steps: +$("#steps").value || 20, reuse: +$("#reuse").value, layers: +$("#layers").value,
     core: +$("#core").value, token: $("#token-red").checked, seed: +$("#seed").value || 0,
+    variant: S.variant,
   };
 }
 
@@ -181,14 +205,31 @@ function renderAssets() {
 function renderSize() {
   const keyframed = S.mode === "i2v" || S.mode === "fl2v";
   if (!keyframed && S.aspect === "auto") S.aspect = "16:9";
-  const opts = Object.keys(ASPECTS).map(a => { const [w, h] = resolveCanvas(...ASPECTS[a]); return [a, a, `${w}×${h}`]; });
+  const opts = Object.keys(ASPECTS).map(a => { const [w, h] = resolveCanvas(...ASPECTS[a], S.short); return [a, a, `${w}×${h}`]; });
   if (keyframed) opts.unshift(["auto", "跟随首帧", "官方做法"]);
   seg($("#aspect"), opts, S.aspect, v => { S.aspect = v; store.set("aspect", v); update(); });
-  seg($("#quality"), Object.entries(QUALITY).map(([k, q]) => [k, q.label, q.sub]), S.quality, v => { S.quality = v; store.set("quality", v); applyQuality(); update(); });
+  seg($("#short-edge"), SHORT_EDGES.map(([s, l, sub]) => [s, l, sub]), S.short,
+      v => { S.short = +v; store.set("short", +v); update(); });
+  const turboOff = !S.status.turbo || (S.mode === "ref" && !S.status.turbo_ref);
+  // a stored "turbo" choice must not survive into a deployment that lacks the
+  // weights, or the job is only refused later by the server
+  if (turboOff && S.variant === "turbo") { S.variant = "base"; store.set("variant", "base"); fixPreset(); }
+  seg($("#variant"), VARIANTS.map(([v, l, sub]) => [v, l, v === "turbo" && turboOff ? "未安装" : sub]), S.variant,
+      v => { if (v === "turbo" && turboOff) return toast("Turbo 权重未安装", true);
+             S.variant = v; store.set("variant", v); fixPreset(); update(); });
+  seg($("#quality"), Object.entries(presets()).map(([k, q]) => [k, q.label, q.sub]), S.quality,
+      v => { S.quality = v; store.set("quality", v); applyQuality(); update(); });
+}
+
+/* keep the selected preset valid when the model or the mode changes */
+function fixPreset() {
+  const p = presets();
+  if (!p[S.quality]) { S.quality = Object.keys(p)[S.variant === "turbo" ? 1 % Object.keys(p).length : 0]; store.set("quality", S.quality); }
+  applyQuality();
 }
 
 function applyQuality() {
-  const q = QUALITY[S.quality];
+  const q = presets()[S.quality] || Object.values(presets())[0];
   $("#steps").value = q.steps; $("#reuse").value = q.reuse; $("#layers").value = q.layers;
   $("#core").value = q.core; $("#token-red").checked = q.token;
 }
@@ -199,7 +240,10 @@ function update() {
   const secs = p.frames / 24;
   $("#dur-readout").textContent = `${secs.toFixed(2)} 秒 · ${p.frames} 帧（官方 4 到 15 秒，帧数对齐到 5 + 17k）`;
   const clamped = S.aspect === "auto" && S.first && S.first.w && resolveCanvas(S.first.w, S.first.h)[2];
-  $("#size-readout").textContent = `官方 768p 画布 ${p.width} × ${p.height}` +
+  // Turbo's distilled schedule has no redundancy for these to exploit
+  ["#reuse", "#core", "#token-red"].forEach(s => { const el = $(s); el.disabled = S.variant === "turbo"; });
+  if (S.variant === "turbo") { $("#reuse").value = 1; $("#core").value = 1; $("#token-red").checked = false; }
+  $("#size-readout").textContent = `官方 ${S.short}p 画布 ${p.width} × ${p.height}` +
     (S.aspect === "auto" ? (S.first && S.first.w ? `（按首帧 ${S.first.w}×${S.first.h} 的比例）` : "（还没有首帧，暂按 16:9）") : "") +
     (clamped ? "，官方取整后超出 h3.c 的 768×1344 像素上限，长边已缩 32 的倍数" : "");
   const e = estimate(p);
@@ -325,8 +369,10 @@ function applyJob(job) {
   if (job.prompt) { $("#prompt").value = job.prompt; store.set("prompt", job.prompt); }
   const p = job.params || {};
   if (p.frames) S.k = Math.min(K_MAX, Math.max(K_MIN, Math.ceil((p.frames - 5) / 17)));
+  if (p.variant) S.variant = p.variant;
   if (p.width && p.height) {
-    const hit = Object.keys(ASPECTS).find(k => { const [w, h] = resolveCanvas(...ASPECTS[k]); return w === p.width && h === p.height; });
+    S.short = Math.min(p.width, p.height) <= 544 ? 480 : 768;
+    const hit = Object.keys(ASPECTS).find(k => { const [w, h] = resolveCanvas(...ASPECTS[k], S.short); return w === p.width && h === p.height; });
     S.aspect = hit || (m === "i2v" || m === "fl2v" ? "auto" : "16:9");
   }
   if (p.quality && QUALITY[p.quality]) S.quality = p.quality;

@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>H3 Studio</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="logo">H3</span> Studio <span class="sub" id="device-sub">MiniMax-H3 · h3.c</span></div>
+  <div class="brand"><span class="logo">H3</span> Studio <span class="sub">MiniMax-H3 · h3.c · Apple M3 Max</span></div>
   <div class="chips" id="chips"></div>
 </header>
 
@@ -35,7 +35,18 @@
     <textarea id="prompt" rows="10" class="mono" placeholder="integrated_multimodal_description: [Shot 1] ..."></textarea>
     <div class="camera-chips" id="camera-chips" title="点击插入运镜描述"></div>
 
-    <label class="field-label">画幅 <span class="hint">MiniMax-H3 官方 768p 画布</span></label>
+    <div class="grid2">
+      <div>
+        <label class="field-label">模型</label>
+        <div class="seg" id="variant"></div>
+      </div>
+      <div>
+        <label class="field-label">清晰度</label>
+        <div class="seg" id="short-edge"></div>
+      </div>
+    </div>
+
+    <label class="field-label">画幅 <span class="hint">MiniMax-H3 官方画布</span></label>
     <div class="seg aspect-seg" id="aspect"></div>
     <div class="size-readout muted small" id="size-readout"></div>
 
@@ -88,7 +99,7 @@
 
 <div id="toast" class="toast" hidden></div>
 <!-- bump ?v= when these files change so browsers drop the cached copies -->
-<script src="create.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="create.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
