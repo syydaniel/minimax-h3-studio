@@ -193,7 +193,14 @@ OFFICIAL_CANVASES = {official_canvas(4 ** (i / 20000 * 2 - 1), 1) for i in range
 
 def build_argv(job):
     p = job["params"]
-    w, h = int(p["width"]), int(p["height"])
+    # the browser sends the short names (create.js params()), the API and older
+    # job records the long ones; accept both so no flag is silently dropped
+    core_reuse = int(p.get("core_reuse", p.get("core", 1)) or 1)
+    token_reduction = bool(p.get("token_reduction", p.get("token", False)))
+    try:
+        w, h = int(p["width"]), int(p["height"])
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("缺少画布尺寸：params 里需要 width 和 height")
     if (w, h) not in OFFICIAL_CANVASES:
         raise ValueError(f"{w}×{h} 不是 MiniMax-H3 官方 768p 画布（例如 16:9 为 1344×768）")
     frames = align_frames(int(p.get("frames", 124)))
@@ -208,12 +215,11 @@ def build_argv(job):
             "--width", str(w), "--height", str(h), "--frames", str(frames),
             "--steps", str(steps), "--layers", str(int(p.get("layers", 50))),
             "--seed", str(int(p.get("seed", 42))), "-o", job["output"]]
-    core = int(p.get("core_reuse", 1))
-    if core > 1:
-        argv += ["--core-reuse", str(core)]
+    if core_reuse > 1:
+        argv += ["--core-reuse", str(core_reuse)]
     else:
         argv += ["--reuse", str(int(p.get("reuse", 1)))]
-    if p.get("token_reduction"):
+    if token_reduction:
         argv.append("--token-reduction")
     if p.get("render_width") and p.get("render_height"):
         argv += ["--render-width", str(int(p["render_width"])),
