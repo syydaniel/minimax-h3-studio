@@ -140,12 +140,16 @@ https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE
 
 ### 界面使用要点
 
+- **清晰度**分 768p 和 480p 两档。480p 用同一个官方算法，只是把短边换成 480
+  （16:9 为 864×480，4:3 为 640×480），耗时约为 768p 的一半，适合试镜头和试提示词
+- **模型**分原版和 Turbo。Turbo 需要自己构建，见 [TURBO.md](TURBO.md)；没构建时显示"未安装"
 - **画幅**只有官方 768p 画布：21:9 为 1536×672，16:9 为 1344×768，4:3 为 1024×768，1:1 为 768×768，
   3:4 为 768×1024，9:16 为 768×1344。首帧类模式可以选"跟随首帧"，按图片比例用官方算法计算画布。
   算法移植自 diffusers 的 `resolve_canvas_size`：
   https://github.com/huggingface/diffusers/tree/main/src/diffusers/modular_pipelines/minimax_h3
 - **时长**只允许官方的 4 到 15 秒。帧数必须是 5 + 17k，所以实际是 107 帧（4.46 秒）到 362 帧（15.08 秒）
-- **质量**：预览 4 步适合试构图；标准 20 步配合复用和 token 缩减，是速度与质量的折中；精品 20 步不做近似
+- **质量**：预览 4 步适合试构图；标准 20 步配合复用和 token 缩减，是速度与质量的折中；精品 20 步不做近似。
+  选了 Turbo 之后档位换成 5 / 6 / 8 步，复用、core-reuse、token 缩减会被禁用（蒸馏后的采样计划没有它们要利用的冗余）
 - **提示词**要用官方的英文结构化格式。不熟的话先在"你的想法"里写中文，再点"Claude 优化"
 - **参考生视频**里带音轨的视频至少要 2.34 秒，更短的请选"静音"
 - 同一时间只跑一个任务，其余排队；命令行里另有 h3 在跑时，队列会等它结束
@@ -156,6 +160,7 @@ https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE
 |---|---|---|
 | `H3_MODEL_DIR` | `models/MiniMax-H3` | 权重目录 |
 | `H3_BIN` | `third_party/h3.c/h3` | h3 可执行文件 |
+| `H3_TURBO_MODEL_DIR` | `models/MiniMax-H3-turbo` | 可选的 Turbo 权重目录，构建方法见 [TURBO.md](TURBO.md) |
 | `H3_DATA_DIR` | `webui/data` | 成片、任务记录、上传文件 |
 | `PORT` | `7870` | 界面端口 |
 | `H3_HOST` | `127.0.0.1` | 监听地址。界面能启动进程、读取本机文件，不要随意改成 `0.0.0.0` 暴露到网络 |
@@ -178,6 +183,12 @@ Python 会卡在一个 `open()` 系统调用上，一直不监听端口。`start
 **画面平坦区域（天空、雾）有一格一格的细网格**
 来自 h3.c 的 VAE 解码实现，不是视频编码造成的。本仓库的 h3.c 已打 PR #1，改用官方 256 像素分块，
 网格明显减轻但没有完全消失。可用 `tools/grid.py` 量化，排查过程见 `docs/NOTES.md`。
+
+**Turbo 建好了，但切到参考生视频就变成"未安装"**
+这是有意的。参考生视频用的 lightx2v 适配器按 video sigma shift = 6 训练，而上游 h3.c 把这个值
+写死成 12，没有开关。界面会用 `strings` 探测 h3 二进制里有没有 `H3_VIDEO_SHIFT`，探测不到就
+不放开参考模式，而不是设一个不起作用的环境变量后照跑。要用的话得自己给 h3.c 打补丁，
+让 `h3_video_sigma_shift()` 读这个环境变量，重新 `make` 后界面会自动放开。详见 [TURBO.md](TURBO.md)。
 
 **参考生视频报 "video soundtrack N requires at least 2 seconds"**
 带音轨的参考视频太短。h3 会按 24 fps 取帧后向下对齐到 5 + 17k，音轨又要求至少 2 秒，
