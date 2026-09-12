@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>H3 Studio</title>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <header class="topbar">
@@ -34,6 +34,9 @@
     <label class="field-label">最终提示词 <span class="hint">可直接编辑</span></label>
     <textarea id="prompt" rows="10" class="mono" placeholder="integrated_multimodal_description: [Shot 1] ..."></textarea>
     <div class="camera-chips" id="camera-chips" title="点击插入运镜描述"></div>
+
+    <label class="field-label">引擎 <span class="hint" id="engine-hint"></span></label>
+    <div class="seg" id="engine"></div>
 
     <div class="grid2">
       <div>
@@ -68,6 +71,8 @@
         <label>核心复用 core-reuse
           <select id="core"><option value="1">关</option><option value="4">4</option><option value="6">6</option></select></label>
         <label class="check"><input type="checkbox" id="token-red"> token 缩减</label>
+        <label class="check"><input type="checkbox" id="sol-attn"> sol_attn（vPipe，实测快 1.2 倍）</label>
+        <label class="check"><input type="checkbox" id="i8-gemm"> i8_gemm（vPipe，int8 矩阵乘）</label>
       </div>
       <p class="muted small">reuse 和 core-reuse 互斥；开 core-reuse 时忽略 reuse。</p>
     </details>
@@ -99,7 +104,7 @@
 
 <div id="toast" class="toast" hidden></div>
 <!-- bump ?v= when these files change so browsers drop the cached copies -->
-<script src="create.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="create.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

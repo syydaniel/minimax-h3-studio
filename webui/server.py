@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import claude_opt
+import vpipe_job
 
 # Paths default to this repository's layout; override with environment
 # variables to point at an existing h3 build, model directory or data folder.
@@ -39,10 +40,12 @@ def _device_name():
 
 DEVICE = _device_name()
 JOBS, UPLOADS, OUTPUTS, THUMBS = (DATA / d for d in ("jobs", "uploads", "outputs", "thumbs"))
-for d in (JOBS, UPLOADS, OUTPUTS, THUMBS):
+PIPELINES = DATA / "pipelines"   # vPipe stage graphs, one per job
+for d in (JOBS, UPLOADS, OUTPUTS, THUMBS, PIPELINES):
     d.mkdir(parents=True, exist_ok=True)
 
 PROGRESS_RE = re.compile(r"^(?P<phase>[A-Za-z][A-Za-z0-9 ]*?)\s+(?P<done>\d+)/(?P<total>\d+)\s*$")
+VPIPE_PROGRESS_RE = re.compile(r"^\[PROGRESS\]\s+\d+% of '(?P<phase>[^']+)' completed .*?\((?P<done>\d+)/(?P<total>\d+)\)")
 PROFILE_RE = re.compile(r"^h3 profile:\s+(?P<comp>.+?)\s{2,}(?P<phase>\S.*?)\s+wall=\s*(?P<wall>[\d.]+)s.*?peak=\s*(?P<peak>[\d.]+)GiB")
 MAX_PIXELS = 768 * 1344
 
@@ -218,12 +221,15 @@ def build_argv(job):
         w, h = int(p["width"]), int(p["height"])
     except (KeyError, TypeError, ValueError):
         raise ValueError("缺少画布尺寸：params 里需要 width 和 height")
+    engine = p.get("engine", "h3")
+    if engine not in ("h3", "vpipe"):
+        raise ValueError("未知引擎：只有 h3 和 vpipe")
     variant = p.get("variant", "base")
     if variant not in ("base", "turbo"):
         raise ValueError("未知模型：只有 base 和 turbo")
     model = model_dir_for(job)
     job["env"] = {}
-    if variant == "turbo":
+    if variant == "turbo" and engine == "h3":
         if not turbo_ready(job["mode"]):
             raise ValueError("Turbo 权重未安装，构建方法见 docs/TURBO.md")
         lo, hi = TURBO_STEPS["ref" if job["mode"] == "ref" else "other"]
@@ -243,6 +249,18 @@ def build_argv(job):
     steps = int(p.get("steps", 20))
     if not 2 <= steps <= 100:
         raise ValueError("步数需在 2 到 100 之间")
+    if engine == "vpipe":
+        if not vpipe_job.ready():
+            raise ValueError("vPipe 没装好：找不到可执行文件、工作目录或权重，见 docs/VPIPE.md")
+        if job["mode"] in ("fl2v", "ref"):
+            raise ValueError("vPipe 这边只有 FL2VA 权重，只能做文生视频和首帧生视频")
+        if int(p.get("reuse", 1)) > 1 or core_reuse > 1 or token_reduction:
+            raise ValueError("vPipe 没有 reuse、core-reuse 和 token 缩减这些开关")
+        job["params"]["frames"] = frames
+        pipe = PIPELINES / f"{job['id']}.vpipeline"
+        vpipe_job.render(job, pipe)
+        job["cwd"] = str(vpipe_job.VPIPE_WORK)   # vPipe reads its model registry from cwd
+        return [str(vpipe_job.VPIPE_BIN), "--launch", str(pipe)], frames
     argv = [str(H3_BIN), "--profile", "-d", str(model), "-p", job["prompt"],
             "--width", str(w), "--height", str(h), "--frames", str(frames),
             "--steps", str(steps), "--layers", str(int(p.get("layers", 50))),
@@ -283,7 +301,7 @@ def handle_line(job, line):
     line = line.strip()
     if not line:
         return False
-    m = PROGRESS_RE.match(line)
+    m = PROGRESS_RE.match(line) or VPIPE_PROGRESS_RE.match(line)
     now = time.time()
     if m:
         ph, done, total = m["phase"].strip(), int(m["done"]), int(m["total"])
@@ -326,7 +344,7 @@ async def run_job(job):
     # grid in flat areas (antirez/h3.c PR #1).
     env = {**os.environ, "H3_VAE_TILE_PIXELS": "256", **job.get("env", {})}
     current_proc = await asyncio.create_subprocess_exec(
-        *argv, cwd=str(H3_BIN.parent), env=env, stdout=asyncio.subprocess.PIPE,
+        *argv, cwd=job.get("cwd") or str(H3_BIN.parent), env=env, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT)
     buf, last_push = b"", 0.0
     while True:
@@ -434,7 +452,8 @@ def turbo_ready(mode=None):
 def status():
     return {"h3": H3_BIN.exists(), "fl2va": (MODEL / "FL2VA/transformer/config.json").exists(),
             "ref2va": ref2va_ready(), "external_h3": external_h3(), "device": DEVICE,
-            "turbo": turbo_ready(), "turbo_ref": turbo_ready("ref")}
+            "turbo": turbo_ready(), "turbo_ref": turbo_ready("ref"),
+            "vpipe": vpipe_job.ready(), "vpipe_audio": vpipe_job.HAS_AUDIO}
 
 
 @app.get("/api/jobs")
@@ -548,6 +567,48 @@ async def cancel_job(jid: str):
     save(job)
     broadcast("job", public(job))
     return public(job)
+
+
+def _unlink_under(path, roots):
+    """Delete `path` only when it really sits under one of `roots`, so a bad
+    record can never make the delete button reach outside the data dirs."""
+    try:
+        p = Path(path).resolve()
+    except OSError:
+        return
+    if not p.is_file():
+        return
+    if any(p.is_relative_to(Path(r).resolve()) for r in roots):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
+@app.delete("/api/jobs/{jid}/record")
+def delete_job(jid: str):
+    """Delete a finished job: its clip, thumbnail, uploads and vPipe graph.
+    Irreversible, so a running job has to be cancelled first rather than
+    silently killed here."""
+    job = jobs.get(jid)
+    if not job:
+        raise HTTPException(404)
+    if job.get("status") in ("queued", "running"):
+        raise HTTPException(400, "任务还在排队或生成中，请先取消再删除")
+    _unlink_under(job.get("output", ""), [OUTPUTS, CLI_OUTPUTS])
+    if job.get("thumb"):
+        _unlink_under(THUMBS / job["thumb"], [THUMBS])
+    _unlink_under(PIPELINES / f"{jid}.vpipeline", [PIPELINES])
+    refs = job.get("refs") or {}
+    for key in ("first", "last"):
+        if refs.get(key):
+            _unlink_under(refs[key], [UPLOADS])
+    for item in refs.get("items", []):
+        _unlink_under(item.get("path", ""), [UPLOADS])
+    (JOBS / f"{jid}.json").unlink(missing_ok=True)
+    jobs.pop(jid, None)
+    broadcast("job_removed", {"id": jid})
+    return {"deleted": jid}
 
 
 @app.get("/api/events")

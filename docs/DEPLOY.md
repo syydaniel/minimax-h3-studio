@@ -143,6 +143,10 @@ https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE
 - **清晰度**分 768p 和 480p 两档。480p 用同一个官方算法，只是把短边换成 480
   （16:9 为 864×480，4:3 为 640×480），耗时约为 768p 的一半，适合试镜头和试提示词
 - **模型**分原版和 Turbo。Turbo 需要自己构建，见 [TURBO.md](TURBO.md)；没构建时显示"未安装"
+- **引擎**分 h3.c 和 vPipe。vPipe 需要自己编译，见 [VPIPE.md](VPIPE.md)，实测快 1.4 到 1.7 倍，
+  音轨一样有；选它之后首尾帧和参考生视频会禁用，因为只装了 FL2VA 分区
+- **删除**在作品详情里，会把成片、缩略图和它用到的上传素材一起删掉，不可恢复；
+  排队中或生成中的任务要先取消才能删
 - **画幅**只有官方 768p 画布：21:9 为 1536×672，16:9 为 1344×768，4:3 为 1024×768，1:1 为 768×768，
   3:4 为 768×1024，9:16 为 768×1344。首帧类模式可以选"跟随首帧"，按图片比例用官方算法计算画布。
   算法移植自 diffusers 的 `resolve_canvas_size`：
@@ -161,6 +165,9 @@ https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE
 | `H3_MODEL_DIR` | `models/MiniMax-H3` | 权重目录 |
 | `H3_BIN` | `third_party/h3.c/h3` | h3 可执行文件 |
 | `H3_TURBO_MODEL_DIR` | `models/MiniMax-H3-turbo` | 可选的 Turbo 权重目录，构建方法见 [TURBO.md](TURBO.md) |
+| `H3_VPIPE_BIN` | `third_party/vpipe/build/apps/vpipe/vpipe` | 可选的 vPipe 可执行文件，见 [VPIPE.md](VPIPE.md) |
+| `H3_VPIPE_WORK` | `models/vpipe-work` | vPipe 的工作目录（模型注册表在这里） |
+| `H3_VPIPE_MODEL_DIR` | `models/MiniMax-H3/FL2VA` | vPipe 用的权重分区 |
 | `H3_DATA_DIR` | `webui/data` | 成片、任务记录、上传文件 |
 | `PORT` | `7870` | 界面端口 |
 | `H3_HOST` | `127.0.0.1` | 监听地址。界面能启动进程、读取本机文件，不要随意改成 `0.0.0.0` 暴露到网络 |

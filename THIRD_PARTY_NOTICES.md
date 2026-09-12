@@ -25,6 +25,14 @@
 - 来源：模型仓库的 `docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md` 与 `docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md`
 - 由 `install.sh` 下载到 `webui/guides/`，供 Claude 优化功能作为系统提示使用
 
+## vPipe（不随仓库分发，可选）
+
+- 上游：https://github.com/tgo-app-dev/vpipe
+- 许可：Apache-2.0
+- 本仓库只提供编译与接入说明（[`docs/VPIPE.md`](docs/VPIPE.md)），不分发其源码或二进制。
+  其中记录了一处 macOS 27 上必需的本地改动（三个 .metal 文件里 `bfloat16` 名字有歧义），
+  该改动施加在使用者自己的 vPipe 检出上。
+
 ## 步数蒸馏 LoRA（不随仓库分发，可选）
 
 只有按 [`docs/TURBO.md`](docs/TURBO.md) 自行构建 Turbo 权重时才需要下载。

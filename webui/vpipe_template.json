@@ -1,0 +1,218 @@
+{
+ "id": "T4_vpipe_turbo6",
+ "stages": [
+  {
+   "id": "model-select",
+   "type": "model-select",
+   "iports": [],
+   "config": {
+    "hf_dir": "Comfy-Org/MiniMax-H3-FL2VA"
+   }
+  },
+  {
+   "id": "load-image",
+   "type": "load-image",
+   "iports": [],
+   "config": {
+    "url": [
+     "/Users/a1-6/h3-lab/assets/t1_first.png"
+    ]
+   }
+  },
+  {
+   "id": "first-frame",
+   "type": "image-resample",
+   "iports": [
+    {
+     "src": "load-image",
+     "oport": 0
+    }
+   ],
+   "config": {
+    "width": 1344,
+    "height": 768,
+    "fit": "crop",
+    "algorithm": "lanczos"
+   }
+  },
+  {
+   "id": "vae-encode-first",
+   "type": "vae-encode",
+   "iports": [
+    {
+     "src": "first-frame",
+     "oport": 0
+    },
+    {
+     "src": "model-select",
+     "oport": 0
+    }
+   ],
+   "config": {
+    "unload_when_idle": "always"
+   }
+  },
+  {
+   "id": "text-prompt",
+   "type": "text-prompt",
+   "iports": [],
+   "config": {
+    "text": "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.\n\nintegrated_multimodal_description: [Shot 1] Live-action, cinematic, the derelict spire shown in <Picture 1> stands on the orange dust plain under the setting sun, preserving its silhouette, the backlight, and the rock formations on both sides. The camera pushes in with small amplitude at slow speed as banks of dust drift across the ground and amber beacons blink along the structure. A lone rider on a hover bike crosses the plain from left to right, trailing a plume of dust.\n\noverall_soundscape: A low wind carries fine grit across the plain, with the fading hum of the hover bike passing by.\n\nnon_diegetic_music: Sustained low synthesizer drones at a slow tempo, steady in volume.\n"
+   }
+  },
+  {
+   "id": "diffusion-conditioner",
+   "type": "diffusion-conditioner",
+   "iports": [
+    {
+     "src": "text-prompt",
+     "oport": 0
+    },
+    {
+     "src": "",
+     "oport": 0
+    },
+    {
+     "src": "model-select",
+     "oport": 0
+    }
+   ],
+   "config": {
+    "unload_when_idle": "always"
+   }
+  },
+  {
+   "id": "minimax-h3-model-config",
+   "type": "minimax-h3-model-config",
+   "iports": [],
+   "config": {
+    "video_shift": 12.0,
+    "audio_shift": 3.0,
+    "condition_timestep": 1.0,
+    "audio_seconds": 0.0,
+    "lora": "larryvrh/MiniMax-H3-Turbo-Lora-v4-600-ema",
+    "lora_scale": 1.0
+   }
+  },
+  {
+   "id": "generate-video",
+   "type": "generate-video",
+   "iports": [
+    {
+     "src": "diffusion-conditioner",
+     "oport": 0
+    },
+    {
+     "src": "",
+     "oport": 0
+    },
+    {
+     "src": "model-select",
+     "oport": 0
+    },
+    {
+     "src": "",
+     "oport": 0
+    },
+    {
+     "src": "",
+     "oport": 0
+    },
+    {
+     "src": "vae-encode-first",
+     "oport": 0
+    },
+    {
+     "src": "",
+     "oport": 0
+    },
+    {
+     "src": "",
+     "oport": 0
+    },
+    {
+     "src": "",
+     "oport": 0
+    },
+    {
+     "src": "minimax-h3-model-config",
+     "oport": 0
+    }
+   ],
+   "config": {
+    "height": 768,
+    "width": 1344,
+    "frames": 107,
+    "fps": 24,
+    "steps": 6,
+    "seed": 7,
+    "i8_gemm": false,
+    "unload_when_idle": "always",
+    "sol_attn": false
+   }
+  },
+  {
+   "id": "vae-decode",
+   "type": "vae-decode",
+   "iports": [
+    {
+     "src": "generate-video",
+     "oport": 0
+    },
+    {
+     "src": "model-select",
+     "oport": 0
+    }
+   ],
+   "config": {}
+  },
+  {
+   "id": "audio-vae-decode",
+   "type": "audio-vae-decode",
+   "iports": [
+    {
+     "src": "generate-video",
+     "oport": 1
+    },
+    {
+     "src": "model-select",
+     "oport": 0
+    }
+   ],
+   "config": {}
+  },
+  {
+   "id": "rgb-to-video",
+   "type": "rgb-to-video",
+   "iports": [
+    {
+     "src": "vae-decode",
+     "oport": 0
+    }
+   ],
+   "config": {
+    "fps": 24
+   }
+  },
+  {
+   "id": "save-video",
+   "type": "save-video",
+   "iports": [
+    {
+     "src": "rgb-to-video",
+     "oport": 0
+    },
+    {
+     "src": "audio-vae-decode",
+     "oport": 0
+    }
+   ],
+   "config": {
+    "output_url": "/Users/a1-6/h3-lab/runs/T4_vpipe_turbo6/out.mp4",
+    "enable_video": true,
+    "enable_audio": true
+   }
+  }
+ ],
+ "subpipelines": []
+}

@@ -119,6 +119,7 @@ function renderStage() {
         <button class="ghost" data-act="reveal">在访达中显示</button>
         <a class="ghost" href="/media/${encodeURIComponent(job.id)}" download="${esc(job.id)}.mp4">下载</a>
         ${job.log_tail && job.log_tail.length ? `<button class="ghost" data-act="log">${App.logFor === job.id ? "收起日志" : "查看日志"}</button>` : ""}
+        <button class="ghost danger" data-act="delete">删除</button>
       </div>
       ${logHTML(job)}
       ${prof ? `<table class="profile-table"><tr><td class="muted">组件</td><td class="muted">阶段</td><td class="num muted">耗时</td><td class="num muted">峰值</td></tr>${prof}</table>` : ""}
@@ -127,7 +128,8 @@ function renderStage() {
     el.innerHTML = head + `<p class="error">${esc(job.error || "任务未完成")}</p>
       ${pipelineHTML(job)}
       <div class="stage-actions"><button class="ghost" data-act="reuse">复用参数重试</button>
-      <button class="ghost" data-act="log">查看日志</button></div>
+      <button class="ghost" data-act="log">查看日志</button>
+      <button class="ghost danger" data-act="delete">删除</button></div>
       <div class="logbox">${esc((job.log_tail || []).join("\n"))}</div>`;
   }
 }
@@ -137,6 +139,14 @@ async function stageAction(act) {
   if (!job) return;
   if (act === "cancel" && confirm("确定取消这个任务？已经算过的部分不会保留。")) {
     try { await api(`/api/jobs/${job.id}`, { method: "DELETE" }); } catch (e) { toast(e.message, true); }
+  } else if (act === "delete") {
+    // irreversible: the clip, its thumbnail and any uploads go with the record
+    if (!confirm(`删除「${job.title || job.id}」？成片和它用到的素材会一起删掉，不能恢复。`)) return;
+    try {
+      await api(`/api/jobs/${job.id}/record`, { method: "DELETE" });
+      removeJob(job.id);
+      toast("已删除");
+    } catch (e) { toast(e.message, true); }
   } else if (act === "reuse") applyJob(job);
   else if (act === "reveal") api(`/api/jobs/${job.id}/reveal`, { method: "POST" }).catch(e => toast(e.message, true));
   else if (act === "log") {
@@ -161,6 +171,13 @@ function logHTML(job) {
 }
 
 /* ---------- gallery + queue ---------- */
+function removeJob(id) {
+  App.jobs.delete(id);
+  if (App.selected === id) App.selected = sortedJobs()[0] ? sortedJobs()[0].id : null;
+  if (App.logFor === id) App.logFor = null;
+  schedule();
+}
+
 function sortedJobs() { return [...App.jobs.values()].sort((a, b) => (b.created || 0) - (a.created || 0)); }
 
 function renderGallery() {
@@ -299,6 +316,7 @@ function connect() {
   es.onopen = () => { App.sse = "open"; schedule(); };
   es.onerror = () => { App.sse = "retry"; schedule(); };
   es.addEventListener("job", e => upsert(JSON.parse(e.data)));
+  es.addEventListener("job_removed", e => removeJob(JSON.parse(e.data).id));
   es.addEventListener("telemetry", e => {
     const t = JSON.parse(e.data);
     App.tele.push(t); if (App.tele.length > App.teleMax) App.tele.shift();

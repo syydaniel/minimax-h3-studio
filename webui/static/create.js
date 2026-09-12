@@ -35,6 +35,10 @@ const ASPECTS = { "21:9": [21, 9], "16:9": [16, 9], "4:3": [4, 3], "1:1": [1, 1]
    smaller short edge, about 40% of the pixels and correspondingly faster. */
 const SHORT_EDGES = [[768, "768p", "官方画布"], [480, "480p", "约快 2 倍"]];
 const VARIANTS = [["base", "原版", "官方权重"], ["turbo", "Turbo 加速", "蒸馏，步数少"]];
+/* h3.c is the native C engine and the only one here with a working audio VAE.
+   vPipe runs the same model from a stage graph and applies the Turbo LoRA at
+   runtime, but its checkpoint repack has an audio VAE this loader cannot read. */
+const ENGINES = [["h3", "h3.c", "带原生音轨"], ["vpipe", "vPipe", "更快，同样带音轨"]];
 
 /* Port of diffusers MiniMax-H3 `resolve_canvas_size` (released checkpoint:
    short edge 768, area capped at 768*1344, both axes rounded to the nearest
@@ -129,6 +133,9 @@ function evalsOf(p) {
 function estimate(p) {
   const x = p.width * p.height * p.frames;
   let denoise = secPerEval(x) * evalsOf(p) * (p.layers / 50) * (p.token ? 0.75 : 1);
+  /* measured on this M3 Max at 864x480x73f, 6 steps: h3.c 641 s, vPipe 460 s,
+     vPipe+sol_attn 376 s. The ETA curve is calibrated on h3.c, so scale it. */
+  if (p.engine === "vpipe") denoise /= p.sol_attn ? 1.70 : 1.39;
   const decode = 2.1e-6 * x + 5;
   return { denoise, total: 20 + denoise + decode };
 }
@@ -139,6 +146,7 @@ const S = {
   aspect: store.get("aspect", "16:9"),
   short: SHORT_EDGES.some(([s]) => s === store.get("short", 768)) ? store.get("short", 768) : 768,
   variant: store.get("variant", "base"),
+  engine: store.get("engine", "h3"),
   k: Math.min(K_MAX, Math.max(K_MIN, store.get("k", 7))),
   quality: store.get("quality", "balanced"),
   first: null, last: null,        // {file, url}
@@ -152,7 +160,8 @@ function params() {
     width, height, frames: framesOf(S.k),
     steps: +$("#steps").value || 20, reuse: +$("#reuse").value, layers: +$("#layers").value,
     core: +$("#core").value, token: $("#token-red").checked, seed: +$("#seed").value || 0,
-    variant: S.variant,
+    variant: S.variant, engine: S.engine,
+    sol_attn: $("#sol-attn").checked, i8_gemm: $("#i8-gemm").checked,
   };
 }
 
@@ -210,6 +219,11 @@ function renderSize() {
   seg($("#aspect"), opts, S.aspect, v => { S.aspect = v; store.set("aspect", v); update(); });
   seg($("#short-edge"), SHORT_EDGES.map(([s, l, sub]) => [s, l, sub]), S.short,
       v => { S.short = +v; store.set("short", +v); update(); });
+  const vpipeOff = !S.status.vpipe;
+  if (vpipeOff && S.engine === "vpipe") { S.engine = "h3"; store.set("engine", "h3"); }
+  seg($("#engine"), ENGINES.map(([v, l, sub]) => [v, l, v === "vpipe" && vpipeOff ? "未安装" : sub]), S.engine,
+      v => { if (v === "vpipe" && vpipeOff) return toast("vPipe 未安装", true);
+             S.engine = v; store.set("engine", v); update(); });
   const turboOff = !S.status.turbo || (S.mode === "ref" && !S.status.turbo_ref);
   // a stored "turbo" choice must not survive into a deployment that lacks the
   // weights, or the job is only refused later by the server
@@ -241,8 +255,13 @@ function update() {
   $("#dur-readout").textContent = `${secs.toFixed(2)} 秒 · ${p.frames} 帧（官方 4 到 15 秒，帧数对齐到 5 + 17k）`;
   const clamped = S.aspect === "auto" && S.first && S.first.w && resolveCanvas(S.first.w, S.first.h)[2];
   // Turbo's distilled schedule has no redundancy for these to exploit
-  ["#reuse", "#core", "#token-red"].forEach(s => { const el = $(s); el.disabled = S.variant === "turbo"; });
-  if (S.variant === "turbo") { $("#reuse").value = 1; $("#core").value = 1; $("#token-red").checked = false; }
+  const vp = S.engine === "vpipe";
+  $$("#modes button").forEach(b => { b.disabled = vp && (b.dataset.mode === "fl2v" || b.dataset.mode === "ref"); });
+  if (vp && (S.mode === "fl2v" || S.mode === "ref")) { setMode("t2v"); return; }
+  $("#engine-hint").textContent = vp ? "vPipe 用官方权重，带音轨；只有 FL2VA，做不了首尾帧和参考生视频" : "";
+  ["#reuse", "#core", "#token-red"].forEach(s => { const el = $(s); el.disabled = S.variant === "turbo" || vp; });
+  ["#sol-attn", "#i8-gemm"].forEach(s => { const el = $(s); el.disabled = !vp; if (!vp) el.checked = false; });
+  if (S.variant === "turbo" || vp) { $("#reuse").value = 1; $("#core").value = 1; $("#token-red").checked = false; }
   $("#size-readout").textContent = `官方 ${S.short}p 画布 ${p.width} × ${p.height}` +
     (S.aspect === "auto" ? (S.first && S.first.w ? `（按首帧 ${S.first.w}×${S.first.h} 的比例）` : "（还没有首帧，暂按 16:9）") : "") +
     (clamped ? "，官方取整后超出 h3.c 的 768×1344 像素上限，长边已缩 32 的倍数" : "");
